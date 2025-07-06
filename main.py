@@ -1,15 +1,22 @@
+import logging
+import os
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils import executor
-import logging
+from aiogram.utils.executor import start_webhook
+from aiohttp import web
 
-# Вставь сюда свой токен
-API_TOKEN = "7612081343:AAHNPmF8Mepb_Bl1Z817raoFy99wPOvd7ZM"
+API_TOKEN = os.getenv("BOT_TOKEN", "YOUR_API_TOKEN")  # Лучше через переменные окружения
 
-# Настройка логов
+WEBHOOK_HOST = os.getenv("RENDER_EXTERNAL_URL", "https://yourdomain.onrender.com")  # Render предоставляет этот URL
+WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
+WEBAPP_HOST = "0.0.0.0"
+WEBAPP_PORT = int(os.getenv("PORT", default=10000))
+
 logging.basicConfig(level=logging.INFO)
 
-# Инициализация бота
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
@@ -24,10 +31,8 @@ offers = {
     "Онлайн-курсы": "📚 Курс по голосу — 50 000 руб., остальные — от 3 000 руб."
 }
 
-# Хранилище выбора пользователя
 user_choices = {}
 
-# Генерация кнопок с галочками
 def generate_keyboard(user_id):
     kb = InlineKeyboardMarkup(row_width=1)
     selected = user_choices.get(user_id, [])
@@ -37,7 +42,6 @@ def generate_keyboard(user_id):
     kb.add(InlineKeyboardButton("✉️ Готово", callback_data="submit"))
     return kb
 
-# Обработка команды /start
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
     user_id = message.from_user.id
@@ -49,7 +53,6 @@ async def send_welcome(message: types.Message):
         reply_markup=generate_keyboard(user_id)
     )
 
-# Обработка нажатия на чекбоксы
 @dp.callback_query_handler(lambda c: c.data.startswith("toggle_"))
 async def toggle_selection(callback_query: types.CallbackQuery):
     item = callback_query.data.replace("toggle_", "")
@@ -63,7 +66,6 @@ async def toggle_selection(callback_query: types.CallbackQuery):
     await callback_query.message.edit_reply_markup(reply_markup=generate_keyboard(uid))
     await callback_query.answer()
 
-# Обработка кнопки "Готово"
 @dp.callback_query_handler(lambda c: c.data == "submit")
 async def handle_submission(callback_query: types.CallbackQuery):
     uid = callback_query.from_user.id
@@ -87,12 +89,23 @@ async def handle_submission(callback_query: types.CallbackQuery):
 
     await bot.send_message(uid, "Продолжаем?", reply_markup=kb)
 
-# Обработка кнопки "Подумать"
 @dp.callback_query_handler(lambda c: c.data == "later")
 async def handle_later(callback_query: types.CallbackQuery):
     await callback_query.message.answer("Спасибо за уделённое время! Вы всегда можете вернуться к боту и пройти опрос повторно.")
 
-# Точка входа
+async def on_startup(dispatcher):
+    await bot.set_webhook(WEBHOOK_URL)
+
+async def on_shutdown(dispatcher):
+    await bot.delete_webhook()
+
 if __name__ == '__main__':
-    print("Бот запущен. Ожидаю команду /start...")
-    executor.start_polling(dp, skip_updates=True)
+    start_webhook(
+        dispatcher=dp,
+        webhook_path=WEBHOOK_PATH,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+        skip_updates=True,
+        host=WEBAPP_HOST,
+        port=WEBAPP_PORT,
+    )
